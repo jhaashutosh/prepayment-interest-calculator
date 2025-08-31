@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Loan Prepayment Simulator (Annual Prepayments)</title>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#151b2f; --muted:#8fa1c7; --text:#eef3ff; --accent:#7c9cff; --good:#44d19f; --warn:#ffd166;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background:linear-gradient(160deg,#0b1020 0%, #111936 100%); color:var(--text);}
+    .wrap{max-width:1200px; margin:32px auto; padding:0 16px}
+    h1{font-size:28px; margin:0 0 12px}
+    p.sub{color:var(--muted); margin:0 0 24px}
+    .grid{display:grid; gap:16px}
+    @media(min-width:900px){.grid{grid-template-columns: 1.2fr .8fr}}
+    .card{background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .row{display:grid; grid-template-columns: 1fr 1fr; gap:12px}
+    .row3{display:grid; grid-template-columns: repeat(3,1fr); gap:12px}
+    label{font-size:13px; color:var(--muted)}
+    input, select, button, textarea{width:100%; padding:12px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.1); background:#0e1430; color:var(--text); outline:none}
+    input:focus{border-color:var(--accent)}
+    button{cursor:pointer; background:linear-gradient(135deg,#6f87ff,#9ab1ff); color:#0b1020; font-weight:600; border:none}
+    button.ghost{background:transparent; color:var(--accent); border:1px solid var(--accent)}
+    .flex{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    .tag{background:#0e1430; border:1px dashed rgba(255,255,255,.12); padding:8px 10px; border-radius:999px; color:var(--muted); font-size:12px}
+    .kpi{display:grid; gap:8px; grid-template-columns: repeat(2, minmax(0,1fr))}
+    .kpi .box{padding:12px; background:#0f1533; border-radius:12px; border:1px solid rgba(255,255,255,.08)}
+    .kpi .val{font-weight:700; font-size:18px}
+    .kpi .hint{font-size:12px; color:var(--muted)}
+
+    table{width:100%; border-collapse:collapse; margin-top:10px}
+    th, td{padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); text-align:right; font-variant-numeric: tabular-nums}
+    th{color:var(--muted); font-weight:600}
+    td:first-child, th:first-child{text-align:left}
+    .good{color:var(--good)}
+    .warn{color:var(--warn)}
+
+    .prepay-grid{display:grid; grid-template-columns: 80px 1fr 80px; gap:8px; align-items:center}
+    .prepay-item{display:grid; grid-template-columns: 90px 1fr; gap:8px; align-items:center}
+    .muted{color:var(--muted); font-size:12px}
+    .footer{margin-top:18px; color:var(--muted); font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Loan Prepayment Simulator</h1>
+    <p class="sub">Enter your loan details and specify <b>annual prepayments for each year</b>. The calculator assumes <b>fixed EMI</b> with prepayments reducing tenure (i.e., you finish early).</p>
+
+    <div class="grid">
+      <div class="card" id="inputs">
+        <div class="row3">
+          <div>
+            <label>Loan Amount (₹)</label>
+            <input id="loanAmount" type="number" min="0" step="1000" value="3000000" />
+          </div>
+          <div>
+            <label>Interest Rate (annual %)</label>
+            <input id="interestRate" type="number" min="0" step="0.01" value="7.5" />
+          </div>
+          <div>
+            <label>Tenure (years)</label>
+            <input id="tenureYears" type="number" min="1" max="40" step="1" value="10" />
+          </div>
+        </div>
+
+        <div style="margin-top:16px" class="row">
+          <div>
+            <label>Bulk set prepayment (₹ per year)</label>
+            <div class="flex">
+              <input id="bulkPrepay" type="number" min="0" step="1000" placeholder="e.g., 300000" />
+              <button id="applyBulk">Apply to all years</button>
+              <button class="ghost" id="clearBulk">Clear all</button>
+            </div>
+          </div>
+          <div>
+            <label>EMI Application</label>
+            <select id="emiMode">
+              <option value="reduceTenure" selected>Reduce Tenure (keep EMI same)</option>
+              <option value="reduceEmi">Reduce EMI (keep tenure)</option>
+            </select>
+            <div class="muted">Most banks default to reduce tenure. "Reduce EMI" is included for comparison.</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="flex" style="justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px">
+            <div>
+              <b>Annual Prepayments</b>
+              <div class="muted">Edit per-year prepayment (₹). Applied at the <b>end of each year</b>.</div>
+            </div>
+            <span class="tag" id="yearsTag"></span>
+          </div>
+          <div id="prepayContainer"></div>
+        </div>
+
+        <div class="flex" style="margin-top:16px">
+          <button id="computeBtn">Compute Schedule</button>
+          <button class="ghost" id="exportCsvBtn">Export CSV</button>
+        </div>
+      </div>
+
+      <div class="card" id="summary">
+        <div class="kpi">
+          <div class="box">
+            <div class="hint">Monthly EMI</div>
+            <div class="val" id="kpiEmi">–</div>
+          </div>
+          <div class="box">
+            <div class="hint">Total Interest Paid</div>
+            <div class="val" id="kpiInterest">–</div>
+          </div>
+          <div class="box">
+            <div class="hint">Total Prepayment</div>
+            <div class="val" id="kpiPrepay">–</div>
+          </div>
+          <div class="box">
+            <div class="hint">Actual Closure</div>
+            <div class="val" id="kpiClosure">–</div>
+          </div>
+        </div>
+        <div class="footer">Note: If the loan closes before the chosen tenure, the remaining years are ignored.
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="flex" style="justify-content:space-between; align-items:center">
+        <b>Year-wise Breakdown</b>
+        <div class="muted" id="tableHint"></div>
+      </div>
+      <div id="tableWrap"></div>
+    </div>
+
+    <p class="footer">Made for quick planning. Always confirm bank policies on how prepayments are applied (month vs year-end, part-payment limits, and whether EMI or tenure is adjusted).</p>
+  </div>
+
+  <script>
+    // Small utilities
+    const fmtINR = n => (n ?? 0).toLocaleString('en-IN', {maximumFractionDigits:0});
+    const byId = id => document.getElementById(id);
+
+    // Elements
+    const loanAmountEl = byId('loanAmount');
+    const interestRateEl = byId('interestRate');
+    const tenureYearsEl = byId('tenureYears');
+    const prepayContainer = byId('prepayContainer');
+    const yearsTag = byId('yearsTag');
+    const bulkPrepayEl = byId('bulkPrepay');
+    const applyBulkBtn = byId('applyBulk');
+    const clearBulkBtn = byId('clearBulk');
+    const computeBtn = byId('computeBtn');
+    const exportCsvBtn = byId('exportCsvBtn');
+    const emiModeEl = byId('emiMode');
+
+    const kpiEmi = byId('kpiEmi');
+    const kpiInterest = byId('kpiInterest');
+    const kpiPrepay = byId('kpiPrepay');
+    const kpiClosure = byId('kpiClosure');
+    const tableWrap = byId('tableWrap');
+    const tableHint = byId('tableHint');
+
+    // State
+    let prepayments = [];
+    let lastState = null;        // last computed input state
+    let lastResult = null;       // last computed result (rows etc.)
+
+    // Unicode-safe base64 helpers
+    function b64EncodeUnicode(str){
+      return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1){
+        return String.fromCharCode('0x' + p1);
+      }));
+    }
+    function b64DecodeUnicode(str){
+      return decodeURIComponent(Array.prototype.map.call(atob(str), function(c){
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+    }
+
+    function createPrepaymentInputs(years){
+      prepayments = Array(years).fill(0);
+      renderPrepaymentInputs();
+      yearsTag.textContent = years + ' years';
+    }
+
+    function renderPrepaymentInputs(){
+      prepayContainer.innerHTML = '';
+      prepayments.forEach((val, idx)=>{
+        const row = document.createElement('div');
+        row.className = 'prepay-item';
+        row.innerHTML = `\n          <div class="muted">Year ${idx+1}</div>\n          <input type="number" min="0" step="5000" value="${val}" data-idx="${idx}" />\n        `;
+        row.querySelector('input').addEventListener('input', (e)=>{
+          const i = +e.target.getAttribute('data-idx');
+          prepayments[i] = +e.target.value || 0;
+        });
+        prepayContainer.appendChild(row);
+      })
+    }
+
+    function applyBulk(){
+      const v = +bulkPrepayEl.value || 0;
+      prepayments = prepayments.map(()=> v);
+      renderPrepaymentInputs();
+    }
+
+    function clearBulk(){
+      prepayments = prepayments.map(()=> 0);
+      renderPrepaymentInputs();
+    }
+
+    function calcEmi(P, annualRate, years){
+      const n = Math.max(1, Math.round(years*12));
+      const r = (annualRate/100)/12;
+      if(r === 0) return P / n;
+      const f = Math.pow(1+r, n);
+      return P * r * f / (f - 1);
+    }
+
+    // Two simulation modes: reduce tenure (default) and reduce EMI
+    function simulateReduceTenure(P, annualRate, years, prepayArr){
+      const r = (annualRate/100)/12;
+      let emi = calcEmi(P, annualRate, years);
+      let balance = P;
+      let totalInterest = 0;
+      let totalPrepay = 0;
+      const rows = [];
+      let y = 0;
+
+      // safe guard loop cap to avoid infinite loops
+      while(balance > 0 && y < Math.max(100, prepayArr.length + 30)){
+        y++;
+        let interestY = 0, principalY = 0;
+        for(let m=0;m<12;m++){
+          if(balance<=0) break;
+          const interest = balance * r;
+          let principal = emi - interest;
+          if(principal > balance){ principal = balance; }
+          balance -= principal;
+          interestY += interest;
+          principalY += principal;
+        }
+        totalInterest += interestY;
+        let prepay = prepayArr[y-1] || 0;
+        if(prepay > 0 && balance>0){
+          if(prepay > balance) prepay = balance;
+          balance -= prepay;
+          totalPrepay += prepay;
+        }
+        rows.push({year:y, principalPaid:principalY, interestPaid:interestY, prepayment:prepay, balanceEnd:balance});
+        if(balance<=0) break;
+      }
+      return {rows, totalInterest, totalPrepay, emi, closedInYears: rows.length};
+    }
+
+    function simulateReduceEmi(P, annualRate, years, prepayArr){
+      const r = (annualRate/100)/12;
+      let emi = calcEmi(P, annualRate, years);
+      let balance = P;
+      let totalInterest = 0;
+      let totalPrepay = 0;
+      const rows = [];
+
+      for(let y=1; y<=years && balance>0; y++){
+        let interestY = 0, principalY = 0;
+        for(let m=0; m<12 && balance>0; m++){
+          const interest = balance * r;
+          let principal = emi - interest;
+          if(principal > balance){ principal = balance; emi = interest + principal; }
+          balance -= principal;
+          interestY += interest;
+          principalY += principal;
+        }
+        totalInterest += interestY;
+        let prepay = prepayArr[y-1] || 0;
+        if(prepay > 0 && balance>0){
+          if(prepay > balance) prepay = balance;
+          balance -= prepay;
+          totalPrepay += prepay;
+          // Recalculate EMI for remaining months at same tenure
+          const monthsLeft = Math.max(1, (years - y) * 12);
+          if(monthsLeft>0) {
+            const f = Math.pow(1 + r, monthsLeft);
+            emi = r === 0 ? balance / monthsLeft : balance * r * f / (f - 1);
+          }
+        }
+        rows.push({year:y, principalPaid:principalY, interestPaid:interestY, prepayment:prepay, balanceEnd:balance});
+      }
+      return {rows, totalInterest, totalPrepay, emi, closedInYears: rows.length};
+    }
+
+    function compute(){
+      const P = +loanAmountEl.value || 0;
+      const rate = +interestRateEl.value || 0;
+      const years = Math.max(1, +tenureYearsEl.value || 1);
+      // Trim prepayments to years
+      prepayments.length = years;
+      prepayments = prepayments.map(v=> +v || 0);
+
+      const mode = emiModeEl.value;
+      const result = mode === 'reduceEmi' ?
+        simulateReduceEmi(P, rate, years, prepayments) :
+        simulateReduceTenure(P, rate, years, prepayments);
+
+      // Save last state/result so export can use it even if hash operations fail
+      lastState = {P, rate, years, prepayments, mode};
+      lastResult = result;
+
+      // KPIs
+      kpiEmi.textContent = '₹ ' + fmtINR(Math.round(result.emi));
+      kpiInterest.textContent = '₹ ' + fmtINR(Math.round(result.totalInterest));
+      kpiPrepay.textContent = '₹ ' + fmtINR(Math.round(result.totalPrepay));
+      const closed = (result.closedInYears || years);
+      kpiClosure.textContent = closed + ' year' + (closed>1?'s':'');
+
+      // Table
+      const rows = result.rows;
+      tableHint.textContent = rows.length + ' row(s)';
+      const tbl = document.createElement('table');
+      tbl.innerHTML = `\n        <thead>\n          <tr>\n            <th>Year</th>\n            <th>Principal Paid (₹)</th>\n            <th>Interest Paid (₹)</th>\n            <th>Prepayment (₹)</th>\n            <th>Balance End (₹)</th>\n          </tr>\n        </thead>\n        <tbody>\n          ${rows.map(r=> `\n            <tr>\n              <td>${r.year}</td>\n              <td>${fmtINR(Math.round(r.principalPaid))}</td>\n              <td>${fmtINR(Math.round(r.interestPaid))}</td>\n              <td class="good">${fmtINR(Math.round(r.prepayment||0))}</td>\n              <td>${fmtINR(Math.round(r.balanceEnd))}</td>\n            </tr>`).join('')}\n        </tbody>\n        <tfoot>\n          <tr>\n            <th>Total</th>\n            <th>${fmtINR(Math.round(rows.reduce((s,r)=>s+r.principalPaid,0)))}</th>\n            <th>${fmtINR(Math.round(rows.reduce((s,r)=>s+r.interestPaid,0)))}</th>\n            <th>${fmtINR(Math.round(rows.reduce((s,r)=>s+(r.prepayment||0),0)))}</th>\n            <th></th>\n          </tr>\n        </tfoot>\n      `;
+      tableWrap.innerHTML = '';
+      tableWrap.appendChild(tbl);
+
+      // Save state to URL for easy sharing — but some sandbox environments (about:srcdoc) block history.replaceState
+      const state = lastState;
+      let enc = '';
+      try{
+        enc = encodeURIComponent(b64EncodeUnicode(JSON.stringify(state)));
+      }catch(e){
+        console.warn('Failed to encode state for URL sharing', e);
+        enc = '';
+      }
+
+      if(enc){
+        // Try history.replaceState first; if it fails (SecurityError in some sandboxed frames), fall back to location.hash.
+        try{
+          history.replaceState(null, '', '#'+enc);
+        }catch(e){
+          try{
+            // location.hash assignment is safer in many environments
+            location.hash = enc;
+          }catch(e2){
+            // As a last resort, do nothing — we still keep result in memory (lastState/lastResult)
+            console.warn('Could not update URL hash for sharing state (security sandbox).');
+          }
+        }
+      }
+    }
+
+    function exportCSV(){
+      // Prefer lastResult if available
+      let res = lastResult;
+      let state = lastState;
+
+      // If no last result, try to load from hash
+      if(!res){
+        try{
+          const hash = location.hash.slice(1);
+          if(hash){
+            const parsed = JSON.parse(b64DecodeUnicode(decodeURIComponent(hash)));
+            state = parsed;
+            res = state.mode === 'reduceEmi' ?
+              simulateReduceEmi(state.P, state.rate, state.years, state.prepayments) :
+              simulateReduceTenure(state.P, state.rate, state.years, state.prepayments);
+          }
+        }catch(e){
+          console.warn('Failed to recover state from URL hash for CSV export.', e);
+        }
+      }
+
+      // If still no result, compute now
+      if(!res){ compute(); res = lastResult; state = lastState; }
+
+      if(!res){ alert('No schedule to export. Please compute first.'); return; }
+
+      let csv = 'Year,Principal Paid,Interest Paid,Prepayment,Balance End\n';
+      res.rows.forEach(r=>{
+        csv += `${r.year},${Math.round(r.principalPaid)},${Math.round(r.interestPaid)},${Math.round(r.prepayment||0)},${Math.round(r.balanceEnd)}\n`;
+      });
+      csv += `Total,${Math.round(res.rows.reduce((s,r)=>s+r.principalPaid,0))},${Math.round(res.rows.reduce((s,r)=>s+r.interestPaid,0))},${Math.round(res.rows.reduce((s,r)=>s+(r.prepayment||0),0))},\n`;
+
+      const blob = new Blob([csv], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'amortization.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // Init: attach handlers
+    tenureYearsEl.addEventListener('input', ()=> createPrepaymentInputs(Math.max(1, +tenureYearsEl.value||1)));
+    applyBulkBtn.addEventListener('click', applyBulk);
+    clearBulkBtn.addEventListener('click', clearBulk);
+    computeBtn.addEventListener('click', compute);
+    exportCsvBtn.addEventListener('click', exportCSV);
+
+    // Load state from URL if provided (safe decode) — fallback to defaults on any error
+    (function(){
+      const hash = (location.hash || '').slice(1);
+      if(hash){
+        try{
+          const parsed = JSON.parse(b64DecodeUnicode(decodeURIComponent(hash)));
+          if(parsed && typeof parsed === 'object'){
+            loanAmountEl.value = parsed.P || loanAmountEl.value;
+            interestRateEl.value = parsed.rate || interestRateEl.value;
+            tenureYearsEl.value = parsed.years || tenureYearsEl.value;
+            emiModeEl.value = parsed.mode || 'reduceTenure';
+            createPrepaymentInputs(parsed.years || +tenureYearsEl.value);
+            prepayments = parsed.prepayments || prepayments;
+            renderPrepaymentInputs();
+            compute();
+            return;
+          }
+        }catch(e){
+          // ignore — proceed with defaults
+          console.info('No valid sharable state in URL or failed to parse it. Using defaults.');
+        }
+      }
+      createPrepaymentInputs(+tenureYearsEl.value || 10);
+      compute();
+    })();
+  </script>
+</body>
+</html>
